@@ -102,14 +102,15 @@ def standardize(X):
 def return_best_chi2dof(tobs):
     """
     Returns the most fitting value for dof assuming tobs follows a chi2_dof distribution,
-    computed with a Kolmogorov-Smirnov test.
+    computed with a Kolmogorov-Smirnov test, removing NANs and negative values.
     Parameters
     ----------
     tobs : np.ndarray
         observations
     Returns
     -------
-        best : best dof and p-value
+        best : tuple
+            tuple with best dof and corresponding chi2 test result
     """
     
     
@@ -122,6 +123,10 @@ def return_best_chi2dof(tobs):
         test = kstest(tobs, lambda x:chi2.cdf(x, df=dof))[0]
         
         ks_tests.append((dof, test))
+        
+    ks_tests = [test for test in ks_tests if test[1] != 'nan'] # remove nans
+    
+    ks_tests = [test for test in ks_tests if test[0] >= 0] # retain only positive dof
         
     best = min(ks_tests, key = lambda t: t[1]) # select best dof according to KS test result
         
