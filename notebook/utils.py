@@ -48,6 +48,7 @@ class non_res(rv_continuous):
         return 256 * (x**2) * np.exp(- 8 * x)
 
 def nonres_sig(N_S, seed):
+    # this function can be used to generate non-resonant signal events.
     
     my_sig = non_res(momtype = 0, a=0, b=1, seed=seed)
     
