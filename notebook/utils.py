@@ -57,7 +57,7 @@ def nonres_sig(N_S, seed):
     return sig_sample
 
 
-def get_logflk_config(M,flk_sigma,lam,weight,iter=[100],seed=None,cpu=False):
+def get_logflk_config(M,flk_sigma,lam,weight,iter=[1000000],seed=None,cpu=False):
     # it returns logfalkon parameters
     return {
             'kernel' : GaussianKernel(sigma=flk_sigma),
