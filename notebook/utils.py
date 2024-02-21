@@ -4,7 +4,7 @@ import os, time
 
 import torch
 
-from falkon import LogisticFalkon
+from falkon import LogisticFalkon, Falkon
 from falkon.kernels import GaussianKernel
 from falkon.options import FalkonOptions
 from falkon.gsc_losses import WeightedCrossEntropyLoss
@@ -14,6 +14,8 @@ import matplotlib.font_manager as font_manager
 
 from scipy.spatial.distance import pdist
 from scipy.stats import norm, chi2, rv_continuous, kstest
+
+from datetime import datetime
 
 
 # UTILS
@@ -69,10 +71,34 @@ def get_logflk_config(M,flk_sigma,lam,weight,iter=[1000000],seed=None,cpu=False)
             'loss' : WeightedCrossEntropyLoss(kernel=GaussianKernel(sigma=flk_sigma), neg_weight=weight),
             }
 
+def weights(weight):
+    def weight_fun(Y, X, idx):
+        wvec = torch.ones(Y.shape,dtype=Y.dtype)
+        wvec[Y==-1] = weight
+        return wvec
+
+    return weight_fun
+
+def get_flk_config(M,flk_sigma,lam,weight,iter=1000000,seed=None,cpu=False):
+    return {
+            'kernel' : GaussianKernel(sigma=flk_sigma),
+            'M' : M, #number of Nystrom centers,
+            'penalty' : lam, # list of regularization parameters,
+            'maxiter' : iter, #list of number of CG iterations,
+            'options' : FalkonOptions(cg_tolerance=np.sqrt(1e-7), keops_active='no', use_cpu=cpu, debug = False),
+            'seed' : seed, # (int or None), the model seed (used for Nystrom center selection) is manually set,
+            'weight_fn' : weights(weight),
+            }
+
 
 def compute_t(preds,Y,weight):
     # it returns extended log likelihood ratio from predictions
     diff = weight*np.sum(1 - np.exp(preds[Y==0]))
+    return 2 * (diff + np.sum(preds[Y==1]))
+
+def compute_t_flk(preds,Y,weight):
+    # it returns extended log likelihood ratio from predictions
+    diff = weight*np.sum(1 - np.exp(preds[Y==-1]))
     return 2 * (diff + np.sum(preds[Y==1]))
 
 def trainer(X,Y,flk_config):
@@ -80,6 +106,14 @@ def trainer(X,Y,flk_config):
     Xtorch=torch.from_numpy(X)
     Ytorch=torch.from_numpy(Y)
     model = LogisticFalkon(**flk_config)
+    model.fit(Xtorch, Ytorch)
+    return model.predict(Xtorch).numpy()
+
+def trainer_flk(X,Y,flk_config):
+    # trainer for logfalkon model
+    Xtorch=torch.from_numpy(X)
+    Ytorch=torch.from_numpy(Y)
+    model = Falkon(**flk_config)
     model.fit(Xtorch, Ytorch)
     return model.predict(Xtorch).numpy()
 
@@ -150,7 +184,7 @@ def run_toys(sig, output_path, N_0, N0, NS, flk_config, toys=np.arange(100), plo
     df: degree of freedom of chi^2 for plots
     '''
 
-    output_path = "./runs/" + output_path
+    output_path = "./runs/" +datetime.now().strftime("%d%b%y_%H%M%S")+"/"+ output_path
     os.makedirs(output_path, exist_ok=True)
 
     #save config file (temporary solution)
@@ -218,6 +252,98 @@ def run_toys(sig, output_path, N_0, N0, NS, flk_config, toys=np.arange(100), plo
 
         if plots_freq!=0 and i in toys[::plots_freq]:
             plot_reconstruction(data=X[Y.flatten()==1], weight_data=1, ref=X[Y.flatten()==0], weight_ref=weight, df=df, t_obs=t, ref_preds=preds[Y.flatten()==0],                                       
+                        save=savefig, save_path=output_path+'/plots/', file_name='sig_'+sig+'_NS{}_seed{}.pdf'.format(NS,i)
+                    )
+
+
+def run_toys_flk(sig, output_path, N_0, N0, NS, flk_config, toys=np.arange(100), plots_freq=0, df=10, savefig=True):
+
+    '''
+    type of signal: "NP0", "NP1", "NP2", "NP3"
+    output_path: directory (inside ./runs/) where to save results
+    N_0: size of ref sample
+    N0: expected num of bkg events
+    NS: expected num of signal events
+    flk_config: dictionary of logfalkon parameters
+    toys: numpy array with seeds for toy generation
+    plots_freq: how often to plot inputs with learned reconstructions
+    df: degree of freedom of chi^2 for plots
+    '''
+
+    output_path = "./runs/" +datetime.now().strftime("%d%b%y_%H%M%S")+"/"+ output_path
+    os.makedirs(output_path, exist_ok=True)
+
+    #save config file (temporary solution)
+    with open(output_path+"/flk_config.txt","w") as f:
+        f.write( str(flk_config) )
+
+    weight = N0/N_0
+
+    dim = 1
+
+    # parameters of distributions
+    a = 8
+    sigma = 0.02
+    if sig=="NP1": mu = 0.8
+    elif sig=='NP3': mu = 0.2
+
+    for i in toys:
+
+        st_time = time.time()
+
+        rng = np.random.default_rng(i)
+
+        N0p = rng.poisson(lam=N0)
+        if sig!="NP0": NSp = rng.poisson(lam=NS) # if data contains anomalies
+        else: NSp = 0
+
+        N = N_0 + N0p + NSp
+
+        print("[--] Toy {}: ".format(i))
+        # build training set
+        # initialize dataset
+        X = np.zeros(shape=(N,dim))
+        # fill with ref, bkg and data
+        if sig=="NP0": X = rng.exponential(scale=1/a, size=(N,dim)) # both reference and data contain only bkg events (no NP component)
+        elif sig=="NP2": 
+            X[:N_0+N0p,:] = rng.exponential(scale=1/a, size=(N_0+N0p,dim)) # ref and bkg
+            X[N_0+N0p:,:] = nonres_sig((NSp,dim), i) # signal
+        else:
+            X[:N_0+N0p,:] = rng.exponential(scale=1/a, size=(N_0+N0p,dim)) # ref and bkg
+            X[N_0+N0p:,:] = rng.normal(loc=mu, scale=sigma, size=(NSp,dim)) # signal
+        # initialize labes
+        Y = np.ones(shape=(N,1))
+        Y[:N_0,:] = -1*np.ones((N_0,1)) # flip ref labels to negative one
+
+        print("[--] Reference shape:{}".format(X[Y.flatten()==-1].shape))
+        print("[--] Data shape:{}".format(X[Y.flatten()==1].shape))
+
+        # in this 1D case, there is no need to standardize
+        #Xoriginal = X.copy()
+        #X = standardize(X)
+
+        # learn_t
+        flk_config['seed']=i # select different centers for different toys
+
+        #eps = 1e-2
+        #preds = np.clip(trainer_flk(X,Y,flk_config),eps,1-eps)
+        preds = trainer_flk(X,Y,flk_config)
+
+        loglk = np.log((preds+1)/(1-preds))
+
+        t = compute_t_flk(loglk,Y,weight)
+        
+        dt = round(time.time()-st_time,2)
+
+        Zscore=norm.ppf(chi2.cdf(t, df))
+
+        print(f"t = {t}\nTime = {dt} sec\nZ = {Zscore}\n\t")
+
+        with open(output_path+"t.txt", 'a') as f:
+            f.write('{},{}\n'.format(i,t))
+
+        if plots_freq!=0 and i in toys[::plots_freq]:
+            plot_reconstruction(data=X[Y.flatten()==1], weight_data=1, ref=X[Y.flatten()==-1], weight_ref=weight, df=df, t_obs=t, ref_preds=preds[Y.flatten()==-1],                                       
                         save=savefig, save_path=output_path+'/plots/', file_name='sig_'+sig+'_NS{}_seed{}.pdf'.format(NS,i)
                     )
 
