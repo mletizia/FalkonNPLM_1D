@@ -135,37 +135,10 @@ def standardize(X):
     return X
 
 def return_best_chi2dof(tobs):
-    """
-    Returns the most fitting value for dof assuming tobs follows a chi2_dof distribution,
-    computed with a Kolmogorov-Smirnov test, removing NANs and negative values.
-    Parameters
-    ----------
-    tobs : np.ndarray
-        observations
-    Returns
-    -------
-        best : tuple
-            tuple with best dof and corresponding chi2 test result
-    """
-    
-    
-    dof_range = np.arange(np.nanmedian(tobs) - 10, np.nanmedian(tobs) + 10, 0.1)
-    
-    ks_tests = []
-    
-    for dof in dof_range:
-        
-        test = kstest(tobs, lambda x:chi2.cdf(x, df=dof))[0]
-        
-        ks_tests.append((dof, test))
-        
-    ks_tests = [test for test in ks_tests if test[1] != 'nan'] # remove nans
-    
-    ks_tests = [test for test in ks_tests if test[0] >= 0] # retain only positive dof
-        
-    best = min(ks_tests, key = lambda t: t[1]) # select best dof according to KS test result
-        
-    return best
+
+    df_fit, _, _ = chi2.fit(tobs, floc=0, fscale=1)
+
+    return df_fit
 
 
 
@@ -573,7 +546,7 @@ def plot_ref_data(ref, data, name=None, dof=None, out_path=None, title=None,
     """
     
  
-    plt.figure(figsize=(10,7))
+    plt.figure(figsize=(8,5))
     plt.style.use('classic')
     #set uniform bins across all data points
     bins = np.histogram(np.hstack((ref,data)), bins = bins)[1]
@@ -641,12 +614,14 @@ def plot_ref_data(ref, data, name=None, dof=None, out_path=None, title=None,
     # Axes ticks
     ax = plt.gca()
     
-    plt.legend(loc ="upper right", frameon=True, fontsize=18)
+    plt.legend(loc ="upper right", frameon=True, fontsize=10)
     
-    ax.text(0.75, 0.55, res, color='black', fontsize=12,
+    ax.text(0.75, 0.55, res, color='black', fontsize=10,
         bbox=dict(facecolor='none', edgecolor='black', boxstyle='round,pad=.5'),transform = ax.transAxes)
     
     plt.tight_layout()
+
+    plt.show()
     
     if out_path:
         plt.savefig(out_path+"/refdata_{}.pdf".format(name), bbox_inches='tight')
