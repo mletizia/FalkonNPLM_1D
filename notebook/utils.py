@@ -4,7 +4,7 @@ import os, time
 
 import torch
 
-from falkon import LogisticFalkon
+from falkon import LogisticFalkon, Falkon
 from falkon.kernels import GaussianKernel
 from falkon.options import FalkonOptions
 from falkon.gsc_losses import WeightedCrossEntropyLoss
@@ -14,6 +14,8 @@ import matplotlib.font_manager as font_manager
 
 from scipy.spatial.distance import pdist
 from scipy.stats import norm, chi2, rv_continuous, kstest
+
+from datetime import datetime
 
 
 # UTILS
@@ -101,37 +103,10 @@ def standardize(X):
     return X
 
 def return_best_chi2dof(tobs):
-    """
-    Returns the most fitting value for dof assuming tobs follows a chi2_dof distribution,
-    computed with a Kolmogorov-Smirnov test, removing NANs and negative values.
-    Parameters
-    ----------
-    tobs : np.ndarray
-        observations
-    Returns
-    -------
-        best : tuple
-            tuple with best dof and corresponding chi2 test result
-    """
-    
-    
-    dof_range = np.arange(np.nanmedian(tobs) - 10, np.nanmedian(tobs) + 10, 0.1)
-    
-    ks_tests = []
-    
-    for dof in dof_range:
-        
-        test = kstest(tobs, lambda x:chi2.cdf(x, df=dof))[0]
-        
-        ks_tests.append((dof, test))
-        
-    ks_tests = [test for test in ks_tests if test[1] != 'nan'] # remove nans
-    
-    ks_tests = [test for test in ks_tests if test[0] >= 0] # retain only positive dof
-        
-    best = min(ks_tests, key = lambda t: t[1]) # select best dof according to KS test result
-        
-    return best
+
+    df_fit, _, _ = chi2.fit(tobs, floc=0, fscale=1)
+
+    return df_fit
 
 
 
@@ -150,7 +125,7 @@ def run_toys(sig, output_path, N_0, N0, NS, flk_config, toys=np.arange(100), plo
     df: degree of freedom of chi^2 for plots
     '''
 
-    output_path = "./runs/" + output_path
+    output_path = "./runs/" +datetime.now().strftime("%d%b%y_%H%M%S")+"/"+ output_path
     os.makedirs(output_path, exist_ok=True)
 
     #save config file (temporary solution)
@@ -220,6 +195,7 @@ def run_toys(sig, output_path, N_0, N0, NS, flk_config, toys=np.arange(100), plo
             plot_reconstruction(data=X[Y.flatten()==1], weight_data=1, ref=X[Y.flatten()==0], weight_ref=weight, df=df, t_obs=t, ref_preds=preds[Y.flatten()==0],                                       
                         save=savefig, save_path=output_path+'/plots/', file_name='sig_'+sig+'_NS{}_seed{}.pdf'.format(NS,i)
                     )
+
 
 def emp_zscore(t0,t1):
     if max(t0) <= t1:
@@ -447,7 +423,7 @@ def plot_ref_data(ref, data, name=None, dof=None, out_path=None, title=None,
     """
     
  
-    plt.figure(figsize=(10,7))
+    plt.figure(figsize=(8,5))
     plt.style.use('classic')
     #set uniform bins across all data points
     bins = np.histogram(np.hstack((ref,data)), bins = bins)[1]
@@ -515,12 +491,14 @@ def plot_ref_data(ref, data, name=None, dof=None, out_path=None, title=None,
     # Axes ticks
     ax = plt.gca()
     
-    plt.legend(loc ="upper right", frameon=True, fontsize=18)
+    plt.legend(loc ="upper right", frameon=True, fontsize=10)
     
-    ax.text(0.75, 0.55, res, color='black', fontsize=12,
+    ax.text(0.75, 0.55, res, color='black', fontsize=10,
         bbox=dict(facecolor='none', edgecolor='black', boxstyle='round,pad=.5'),transform = ax.transAxes)
     
     plt.tight_layout()
+
+    plt.show()
     
     if out_path:
         plt.savefig(out_path+"/refdata_{}.pdf".format(name), bbox_inches='tight')
